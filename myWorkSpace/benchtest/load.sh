@@ -1,0 +1,1 @@
+cgdb --args python /home/deemo/mxnet/example/gluon/image_classification.py --model resnet18 --dataset caltech101 --gpus 0 --epoch 1 --kvstore dist-sync-device

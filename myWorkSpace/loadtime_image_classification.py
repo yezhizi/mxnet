@@ -15,7 +15,15 @@
 # specific language governing permissions and limitations
 # under the License.
 
+
+
 from __future__ import division
+
+from timetracker import TimeTracker
+
+timetracker = TimeTracker()
+timetracker.start('before kvstore creation')
+
 
 import argparse, time, os
 import logging
@@ -102,6 +110,11 @@ parser.add_argument('--builtin-profiler', type=int, default=0, help='Enable buil
 opt = parser.parse_args()
 
 # global variables
+timetracker.end('before kvstore creation')
+kv = mx.kv.create(opt.kvstore)
+
+timetracker.start('context preparation')
+
 logger.info('Starting new image-classification task:, %s',opt)
 mx.random.seed(opt.seed)
 model_name = opt.model
@@ -112,7 +125,7 @@ num_gpus = len(context)
 batch_size *= max(1, num_gpus)
 lr_steps = [int(x) for x in opt.lr_steps.split(',') if x.strip()]
 metric = CompositeEvalMetric([Accuracy(), TopKAccuracy(5)])
-kv = mx.kv.create(opt.kvstore)
+
 
 def get_model(model, ctx, opt):
     """Model initialization."""
@@ -205,20 +218,23 @@ def train(opt, ctx):
     total_time = 0
     num_epochs = 0
     best_acc = [0]
-    # need broadcast for pulling the params from the server
+    timetracker.end('context preparation')
+    timetracker.print_all('ms')
+    timetracker.start('training 1')
+    
     for epoch in range(opt.start_epoch, opt.epochs):
         trainer = update_learning_rate(opt.lr, trainer, epoch, opt.lr_factor, lr_steps)
         tic = time.time()
         train_data.reset()
         metric.reset()
         btic = time.time()
-        
         for i, batch in enumerate(train_data):
             data = gluon.utils.split_and_load(batch.data[0].astype(opt.dtype), ctx_list=ctx, batch_axis=0)
             label = gluon.utils.split_and_load(batch.label[0].astype(opt.dtype), ctx_list=ctx, batch_axis=0)
             outputs = []
             Ls = []
             with ag.record():
+                
                 for x, y in zip(data, label):
                     z = net(x)
                     L = loss(z, y)
@@ -227,6 +243,7 @@ def train(opt, ctx):
                     Ls.append(L)
                     outputs.append(z)
                 ag.backward(Ls)
+            
             trainer.step(batch.data[0].shape[0])
             metric.update(label, outputs)
             if opt.log_interval and not (i+1)%opt.log_interval:
@@ -234,7 +251,19 @@ def train(opt, ctx):
                 logger.info('Epoch[%d] Batch [%d]\tSpeed: %f samples/sec\t%s=%f, %s=%f'%(
                                epoch, i, batch_size/(time.time()-btic), name[0], acc[0], name[1], acc[1]))
             btic = time.time()
-
+            if i == 0:
+                timetracker.end('training 1')
+                timetracker.start('training 2')
+            if i==1:
+                timetracker.end('training 2')
+                timetracker.start('training 3')
+            if i==2:
+                timetracker.end('training 3')
+                timetracker.start('training 4')
+            if i==3:
+                timetracker.end('training 4')
+            
+                
         epoch_time = time.time()-tic
 
         # First epoch will usually be much slower than the subsequent epics,
