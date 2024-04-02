@@ -7,7 +7,7 @@
 - Python: 3.9
 - gcc version: 9.3.0
 - MXnet to build: 1.9.1
-> Note: Choose your cuda and cnDNN version  according to [here](https://developer.nvidia.com/cuda-gpus) and [here](https://docs.nvidia.com/deeplearning/cudnn/reference/support-matrix.html)
+> Note: Choose your cuda and cnDNN version  according to [here](https://developer.nvidia.com/cuda-gpus) and [here](https://docs.nvidia.com/deeplearning/cudnn/reference/support-matrix.html) and [this link](https://en.wikipedia.org/wiki/CUDA#GPUs_supported)
 
 
 ## Install Prerequisites
@@ -67,7 +67,7 @@ cmake --build . --parallel 8
 After building, you can install the python package:
 ```bash
 cd python
-python -m pip install -e --user .
+python -m pip install  --user -e .
 ```
 Then you can test the installation:
 ```bash
