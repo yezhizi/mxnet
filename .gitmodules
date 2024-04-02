@@ -58,3 +58,6 @@
 [submodule "/home/deemo/mxnet/3rdparty/intgemm"]
 	path = /home/deemo/mxnet/3rdparty/intgemm
 	url = https://github.com/kpu/intgemm.git
+[submodule "3rdparty/ps-lite-elastic"]
+	path = 3rdparty/ps-lite-elastic
+	url = git@github.com:yezhizi/ps-lite-elastic.git
