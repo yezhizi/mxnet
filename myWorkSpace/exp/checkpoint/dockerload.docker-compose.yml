@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  scheduler:
+    image: mxnet:latest
+    environment:
+      DMLC_ROLE: scheduler
+      DMLC_PS_ROOT_URI: 127.0.0.1
+      DMLC_PS_ROOT_PORT: 9092
+      DMLC_NUM_SERVER: 1
+      DMLC_NUM_WORKER: 1
+      SCALING_TIMES: "0"
+      MXNET_CUDNN_AUTOTUNE_DEFAULT: "0"
+    command: python3 cifa10_dist.py
+
+  server:
+    image: mxnet:latest
+    environment:
+      DMLC_ROLE: server
+      DMLC_PS_ROOT_URI: 127.0.0.1
+      DMLC_PS_ROOT_PORT: 9092
+      DMLC_NUM_SERVER: 1
+      DMLC_NUM_WORKER: 1
+      SCALING_TIMES: "0"
+      MXNET_CUDNN_AUTOTUNE_DEFAULT: "0"
+    command: python3 cifa10_dist.py
+
+  worker:
+    image: mxnet:latest
+    environment:
+      DMLC_ROLE: worker
+      DMLC_PS_ROOT_URI: 127.0.0.1
+      DMLC_PS_ROOT_PORT: 9092
+      DMLC_NUM_SERVER: 1
+      DMLC_NUM_WORKER: 1
+      SCALING_TIMES: "0"
+      MXNET_CUDNN_AUTOTUNE_DEFAULT: "0"
+      WORKER_NAME: "WORKER_0"
+    command: python3 cifa10_dist.py
