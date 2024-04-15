@@ -74,10 +74,10 @@ class KVStoreServer(object):
         check_call(_LIB.MXKVStoreRunServer(self.handle, _ctrl_proto(self._controller()), None))
 
 def _init_kvstore_server_module():
-    """Start server/scheduler."""
-    is_worker = ctypes.c_int()
-    check_call(_LIB.MXKVStoreIsWorkerNode(ctypes.byref(is_worker)))
-    if is_worker.value == 0:
+    """Start server."""
+    is_server = ctypes.c_int()
+    check_call(_LIB.MXKVStoreIsServerNode(ctypes.byref(is_server)))
+    if is_server.value == 1:
         kvstore = create('dist')
         server = KVStoreServer(kvstore)
         server.run()

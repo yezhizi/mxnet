@@ -2745,6 +2745,12 @@ int MXKVStorePullRowSparse(KVStoreHandle handle,
   static_cast<KVStore*>(handle)->PullRowSparse(v_keys, v_val_rowids, priority);
   API_END();
 }
+int MXKVStoreNotifyBatchEnd(KVStoreHandle handle){
+  API_BEGIN();
+  LOG(FATAL) << "MXKVStoreBatchEnd has been deprecated. Please use MXKVStoreBarrier instead.";
+  API_END();
+
+}
 
 int MXKVStorePullRowSparseEx(KVStoreHandle handle,
                              uint32_t num,
@@ -2876,6 +2882,24 @@ int MXKVStoreRunServer(KVStoreHandle handle,
       controller_temp(head, body.c_str(), controller_handle_temp);
   };
   static_cast<KVStore*>(handle)->RunServer(ctrl);
+  API_END();
+}
+int MXKVStoreRunController(KVStoreHandle handle){
+  API_BEGIN();
+  static_cast<KVStore*>(handle)->RunController();
+  API_END();
+
+}
+int MXKVStoreNotifyPreparationFinished(KVStoreHandle handle) {
+  API_BEGIN();
+  static_cast<KVStore*>(handle)->NotifyPreparationFinished();
+  API_END();
+}
+
+int MXKVStoreIsScaleNode(KVStoreHandle handle, int *ret){
+  API_BEGIN();
+  bool is_scale = static_cast<KVStore*>(handle)->IsScaleNode();
+  *ret = is_scale ? 1 : 0;
   API_END();
 }
 

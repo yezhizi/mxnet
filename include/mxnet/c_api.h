@@ -3020,6 +3020,10 @@ MXNET_DLL int MXKVStoreGetType(KVStoreHandle handle,
 // Part 6: advanced KVStore for multi-machines
 //--------------------------------------------
 
+MXNET_DLL int MXKVStoreNotifyBatchEnd(KVStoreHandle handle);
+
+
+
 /**
  * \brief return The rank of this node in its group, which is in [0, GroupSize).
  *
@@ -3094,7 +3098,7 @@ typedef void (MXKVStoreServerController)(int head,
                                          void *controller_handle);
 
 /**
- * \brief Run as server (or scheduler)
+ * \brief Run as server 
  * \param handle handle to the KVStore
  * \param controller the user-defined server controller
  * \param controller_handle helper handle for implementing controller
@@ -3105,12 +3109,23 @@ MXNET_DLL int MXKVStoreRunServer(KVStoreHandle handle,
                                  void *controller_handle);
 
 /**
+ * \brief Run as controller 
+ * \param handle handle to the KVStore
+ * \return 0 when success, -1 when failure happens
+ */
+MXNET_DLL int MXKVStoreRunController(KVStoreHandle handle);
+/**
  * \brief Send a command to all server nodes
  * \param handle handle to the KVStore
  * \param cmd_id the head of the command
  * \param cmd_body the body of the command
  * \return 0 when success, -1 when failure happens
  */
+
+MXNET_DLL int MXKVStoreNotifyPreparationFinished(KVStoreHandle handle);
+
+MXNET_DLL int MXKVStoreIsScaleNode(KVStoreHandle handle, int *ret);
+
 MXNET_DLL int MXKVStoreSendCommmandToServers(KVStoreHandle handle,
                                              int cmd_id,
                                              const char* cmd_body);

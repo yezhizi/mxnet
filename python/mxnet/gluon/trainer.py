@@ -317,6 +317,12 @@ class Trainer(object):
                                   'is used.')
         self._optimizer.rescale_grad = scale
 
+    def init(self):
+        if not self._kv_initialized:
+            self._init_kvstore()
+        if self._params_to_init:
+            self._init_params()
+    
     def step(self, batch_size, ignore_stale_grad=False):
         """Makes one step of parameter update. Should be called after
         `autograd.backward()` and outside of `record()` scope.

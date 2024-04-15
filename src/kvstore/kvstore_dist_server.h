@@ -41,6 +41,10 @@
 namespace mxnet {
 namespace kvstore {
 
+enum class ControllerCommand {
+  kNotifyPreFinished = 11,
+};
+
 // maintain same order in frontend.
 enum class CommandType {
   kController, kSetMultiPrecision, kStopServer, kSyncMode,

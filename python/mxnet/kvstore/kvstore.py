@@ -137,6 +137,16 @@ class KVStore(KVStoreBase):
         else:
             raise ValueError('Unknown capability: {}'.format(capability))
 
+    def notify_begin(self):
+        """Notify the server that the worker is ready for training.
+
+        This function should be called after worker is ready for training.
+        """
+        #TODO :need add if not scale node then return
+        if not self.is_scale:
+            return 
+        check_call(_LIB.MXKVStoreNotifyPreparationFinished(self.handle))
+    
     def init(self, key, value):
         """ Initializes a single or a sequence of key-value pairs into the store.
 
@@ -598,7 +608,24 @@ class KVStore(KVStoreBase):
                 self._send_command_to_servers(cmd, '')
         else:
             self._set_updater(opt.get_updater(optimizer))
+    def batch_end(self):
+        """ Notify the kvstore that a batch of data has been processed.
 
+        This function is used for distributed training. When using multiple machines,
+        this function should be invoked after each mini-batch of data has been processed.
+        """
+        check_call(_LIB.MXKVStoreNotifyBatchEnd(self.handle))
+
+    @property
+    def is_scale(self):
+        """ Returns whether the kvstore is a scale node."""
+        
+        is_scale = ctypes.c_int()
+        check_call(_LIB.MXKVStoreIsScaleNode(self.handle, ctypes.byref(is_scale)))
+        
+        return True if is_scale.value else False
+    
+    
     @property
     def type(self):
         """ Returns the type of this kvstore.
