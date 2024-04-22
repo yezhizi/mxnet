@@ -150,6 +150,7 @@ def train_batch(batch_list, context, network, gluon_trainer):
             continue
         # temp = nd.zeros(param.shape, ctx=ctx[0])
         kvstore.pull(idx, param.list_grad(), priority=-idx)
+        param.grad().wait_to_read()
         # temp.wait_to_read()
         # param.grad()[:] = temp
         # kvstore.pull(idx, param.grad(), priority=-idx)
@@ -158,6 +159,8 @@ def train_batch(batch_list, context, network, gluon_trainer):
     # Update the parameters
     # this_batch_size = batch_list[0].shape[0]
     gluon_trainer.step(kvstore.num_workers)
+    for idx, param in enumerate(params):
+        print("Key: ", idx, "Value: ", np.mean(param.data().asnumpy()))
 
 # Load the training data
 train_data = gluon.data.DataLoader(gluon.data.vision.CIFAR10(train=True, transform=transform), batch_size,
@@ -190,8 +193,7 @@ for idx, param in enumerate(params):
         continue
     kvstore.init(idx, param.data())
     kvstore.pull(idx, param.data(), priority=-idx)
-#     param.data().wait_to_read()
-# nd.waitall()
+    param.data().wait_to_read()
 
 
 print("Training Started")
@@ -205,7 +207,8 @@ for epoch in range(epochs):
         train_batch(batch, ctx, net, trainer)
 
         batch_num += 1
-        # kvstore.batch_end()
+        kvstore.batch_end()
+
 
     # Print test accuracy after every epoch
     test_accuracy = evaluate_accuracy(test_data, net)
