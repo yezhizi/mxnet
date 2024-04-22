@@ -142,7 +142,6 @@ class KVStore(KVStoreBase):
 
         This function should be called after worker is ready for training.
         """
-        #TODO :need add if not scale node then return
         if not self.is_scale:
             return 
         check_call(_LIB.MXKVStoreNotifyPreparationFinished(self.handle))
@@ -615,7 +614,9 @@ class KVStore(KVStoreBase):
         this function should be invoked after each mini-batch of data has been processed.
         """
         check_call(_LIB.MXKVStoreNotifyBatchEnd(self.handle))
-
+    def test(self,key,vals):
+        ckeys, cvals, use_str_keys = _ctype_key_value(key, vals)
+        check_call(_LIB.MXKVStoreTest(self.handle, mx_uint(len(ckeys)), ckeys, cvals))
     @property
     def is_scale(self):
         """ Returns whether the kvstore is a scale node."""

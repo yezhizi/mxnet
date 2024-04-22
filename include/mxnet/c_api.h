@@ -3022,7 +3022,10 @@ MXNET_DLL int MXKVStoreGetType(KVStoreHandle handle,
 
 MXNET_DLL int MXKVStoreNotifyBatchEnd(KVStoreHandle handle);
 
-
+MXNET_DLL int MXKVStoreTest(KVStoreHandle handle,
+                            uint32_t num,
+                            const int* keys,
+                            NDArrayHandle* vals);
 
 /**
  * \brief return The rank of this node in its group, which is in [0, GroupSize).

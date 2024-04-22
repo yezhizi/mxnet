@@ -2747,10 +2747,22 @@ int MXKVStorePullRowSparse(KVStoreHandle handle,
 }
 int MXKVStoreNotifyBatchEnd(KVStoreHandle handle){
   API_BEGIN();
-  LOG(FATAL) << "MXKVStoreBatchEnd has been deprecated. Please use MXKVStoreBarrier instead.";
+  static_cast<KVStore*>(handle)->BatchEnd();
   API_END();
 
 }
+MXNET_DLL int MXKVStoreTest(KVStoreHandle handle,
+                            uint32_t num,
+                            const int* keys,
+                            NDArrayHandle* vals){
+  API_BEGIN();
+  std::vector<int> v_keys(num);
+  std::vector<NDArray*> v_vals(num);
+  for (uint32_t i = 0; i < num; ++i) {
+    LOG(INFO) << "key: " << keys[i] << "params address "<< vals[i];
+  }
+  API_END();;
+                            }
 
 int MXKVStorePullRowSparseEx(KVStoreHandle handle,
                              uint32_t num,
