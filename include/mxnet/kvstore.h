@@ -480,6 +480,8 @@ class KVStore {
 
   virtual void NotifyPreparationFinished() {}
 
+  virtual void BatchEnd(){}
+
  protected:
   /**
    * \brief the user-defined updater

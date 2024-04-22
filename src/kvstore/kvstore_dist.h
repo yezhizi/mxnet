@@ -31,9 +31,24 @@
 #include "mxnet/engine.h"
 #include "ps/ps.h"
 #include "./kvstore_dist_server.h"
-#include "./kvstore_dist_controller.h"
+
+#include <iterator>
+
 namespace mxnet {
 namespace kvstore {
+
+std::ostream & operator<<(std::ostream &out, const NDArray &ndarray){
+  auto shape = ndarray.shape();
+  NDArray temp = NDArray(shape, Context::CPU(), false, ndarray.dtype());
+  temp.SyncCopyFromCPU(ndarray.data().dptr_, ndarray.shape().Size());
+  temp.WaitToRead();
+  out << "[";
+  std::copy(temp.data().dptr<float>(), temp.data().dptr<float>() + temp.shape().Size(),
+            std::ostream_iterator<float>(out, ", "));
+  out << "]";
+  return out;
+
+}
 
 /**
  * \brief distributed kvstore
@@ -48,6 +63,9 @@ class KVStoreDist : public KVStoreLocal {
     if (IsWorkerNode()) {
       int new_customer_id = GetNewCustomerId();
       ps_worker_ = new ps::KVWorker<char>(0, new_customer_id);
+      using namespace std::placeholders;
+      static_cast<ps::SimpleApp*>(ps_worker_)
+          ->set_request_handle(std::bind(&KVStoreDist::RequestHandle, this, _1, _2));
       ps::StartAsync(new_customer_id, "mxnet\0");
       if (!ps::Postoffice::Get()->is_recovery() && !IsScaleNode()) {
         ps::Postoffice::Get()->Barrier(new_customer_id,
@@ -148,9 +166,16 @@ class KVStoreDist : public KVStoreLocal {
 
   void NotifyPreparationFinished() override {
     CHECK(IsWorkerNode() && IsScaleNode());
-    int head = static_cast<int>(ControllerCommand::kNotifyPreFinished);
+    int head = static_cast<int>(ControllerCommand::kNotifyPreparationFinished);
     ps_worker_->Wait(ps_worker_->Request(head, "", ps::kScheduler));
     LOG(INFO) << "Worker " << get_rank() << " notify preparation finished";
+
+    // ps::Postoffice::Get()->UpdateScaleNodes({});
+
+    // wait for ps migation
+    while (true) {
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
   }
 
   void RunController() override {
@@ -165,6 +190,18 @@ class KVStoreDist : public KVStoreLocal {
     ps::Finalize(0, true);
     delete controller_;
     controller_ = nullptr;
+  }
+  void BatchEnd() override {
+    CHECK(IsWorkerNode() && !IsScaleNode());
+    this->timestamp_++;
+    LOG(INFO) << "Trainning batch end, timestamp: " << this->timestamp_;
+    std::lock_guard<std::mutex> lock(scale_nodes_mu_);
+    if (scale_nodes_.GetFutureTimestamp() == this->timestamp_) {
+      LOG(INFO) << "timestamp reach " << this->timestamp_ << ", start to scalling";
+      // TODO: scalling operation
+      ps::Postoffice::Get()->UpdateScaleNodes(scale_nodes_.GetNodes(), scale_nodes_.IsWorker());
+      scale_nodes_.Clear();
+    }
   }
 
  protected:
@@ -211,11 +248,28 @@ class KVStoreDist : public KVStoreLocal {
   static int GetNewCustomerId() {
     return customer_id_++;
   }
+  std::unordered_map<int, NDArray> parameters_;
+
+  std::string DebugParamAbstract(const NDArray * param) {
+
+    auto shape = param->shape();
+    NDArray temp = NDArray(shape, Context::CPU(), false, param->dtype());
+    temp.SyncCopyFromCPU(param->data().dptr_, param->shape().Size());
+    temp.WaitToRead();
+    // mean
+    float mean = 0;
+    for (int i = 0; i < temp.shape().Size(); i++) {
+      mean += temp.data().dptr<float>()[i];
+    }
+    mean /= temp.shape().Size();
+    return "shape: " + std::to_string(temp.shape().Size()) + ", mean: " + std::to_string(mean);
+  }
 
   void InitImpl(const std::vector<int>& keys, const std::vector<NDArray>& values) override {
     CheckUnique(keys);
     for (size_t i = 0; i < keys.size(); ++i) {
       InitKV(keys[i], values[i]);
+      parameters_[keys[i]] = values[i];
     }
     if (get_rank() == 0 && this->ps_worker_->get_customer()->customer_id() == 0) {
       Push_(keys, values, 0, false);
@@ -227,7 +281,7 @@ class KVStoreDist : public KVStoreLocal {
     } else {
       // do nothing
     }
-    if (!ps::Postoffice::Get()->is_recovery()) {
+    if (!ps::Postoffice::Get()->is_recovery() && !ps::Postoffice::Get()->is_scale()) {
       Barrier();
     }
   }
@@ -849,6 +903,23 @@ class KVStoreDist : public KVStoreLocal {
     return pskv;
   }
 
+  void RequestHandle(const ps::SimpleData& recved, ps::SimpleApp* app) {
+    ControllerCommand command = static_cast<ControllerCommand>(recved.head);
+    switch (command) {
+      case ControllerCommand::kNodeScaleAnounce: {
+        const std::string& body = recved.body;
+        LOG(INFO) << body;
+        std::lock_guard<std::mutex> lock(scale_nodes_mu_);
+        this->scale_nodes_.Decode(body);
+        app->Response(recved, "");
+        break;
+      }
+      default: {
+        break;
+      }
+    }
+  }
+
   /**
    * \brief the server handle
    */
@@ -879,6 +950,13 @@ class KVStoreDist : public KVStoreLocal {
    */
   std::unordered_map<int, NDArray> residual_;
   bool log_verbose_;
+
+  // the var timestamp for scalling clock
+  // only frontend thread will use it
+  int timestamp_ = 0;
+
+  std::mutex scale_nodes_mu_;    // mutex for scale_nodes_
+  NodeScalingInfo scale_nodes_;  // store the scaling nodes information
 };
 
 }  // namespace kvstore
