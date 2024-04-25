@@ -31,23 +31,24 @@
 #include "mxnet/engine.h"
 #include "ps/ps.h"
 #include "./kvstore_dist_server.h"
+#include "./kvstore_dist_controller.h"
 
 #include <iterator>
 
 namespace mxnet {
 namespace kvstore {
 
-std::ostream & operator<<(std::ostream &out, const NDArray &ndarray){
+std::ostream& operator<<(std::ostream& out, const NDArray& ndarray) {
   auto shape = ndarray.shape();
   NDArray temp = NDArray(shape, Context::CPU(), false, ndarray.dtype());
   temp.SyncCopyFromCPU(ndarray.data().dptr_, ndarray.shape().Size());
   temp.WaitToRead();
   out << "[";
-  std::copy(temp.data().dptr<float>(), temp.data().dptr<float>() + temp.shape().Size(),
+  std::copy(temp.data().dptr<float>(),
+            temp.data().dptr<float>() + temp.shape().Size(),
             std::ostream_iterator<float>(out, ", "));
   out << "]";
   return out;
-
 }
 
 /**
@@ -59,13 +60,15 @@ std::ostream & operator<<(std::ostream &out, const NDArray &ndarray){
 class KVStoreDist : public KVStoreLocal {
  public:
   explicit KVStoreDist(bool use_device_comm)
-      : KVStoreLocal(use_device_comm), ps_worker_(nullptr), server_(nullptr) {
+      : KVStoreLocal(use_device_comm), ps_worker_(nullptr), server_(nullptr),
+      timestamp_(0){
     if (IsWorkerNode()) {
       int new_customer_id = GetNewCustomerId();
       ps_worker_ = new ps::KVWorker<char>(0, new_customer_id);
       using namespace std::placeholders;
       static_cast<ps::SimpleApp*>(ps_worker_)
           ->set_request_handle(std::bind(&KVStoreDist::RequestHandle, this, _1, _2));
+      ps_worker_->set_request_handle(std::bind(&KVStoreDist::DataHandle, this, _1, _2, _3));
       ps::StartAsync(new_customer_id, "mxnet\0");
       if (!ps::Postoffice::Get()->is_recovery() && !IsScaleNode()) {
         ps::Postoffice::Get()->Barrier(new_customer_id,
@@ -169,13 +172,8 @@ class KVStoreDist : public KVStoreLocal {
     int head = static_cast<int>(ControllerCommand::kNotifyPreparationFinished);
     ps_worker_->Wait(ps_worker_->Request(head, "", ps::kScheduler));
     LOG(INFO) << "Worker " << get_rank() << " notify preparation finished";
-
-    // ps::Postoffice::Get()->UpdateScaleNodes({});
-
-    // wait for ps migation
-    while (true) {
-      std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
+    ps::Postoffice::Get()->UpdateScaleNodes({}); // update scale state
+    this->is_scaled_ = true;
   }
 
   void RunController() override {
@@ -192,14 +190,22 @@ class KVStoreDist : public KVStoreLocal {
     controller_ = nullptr;
   }
   void BatchEnd() override {
-    CHECK(IsWorkerNode() && !IsScaleNode());
+    CHECK(IsWorkerNode() && !ps::Postoffice::Get()->is_scale());
     this->timestamp_++;
     LOG(INFO) << "Trainning batch end, timestamp: " << this->timestamp_;
     std::lock_guard<std::mutex> lock(scale_nodes_mu_);
     if (scale_nodes_.GetFutureTimestamp() == this->timestamp_) {
       LOG(INFO) << "timestamp reach " << this->timestamp_ << ", start to scalling";
-      // TODO: scalling operation
+      // scalling operation
       ps::Postoffice::Get()->UpdateScaleNodes(scale_nodes_.GetNodes(), scale_nodes_.IsWorker());
+
+      // TODO: move parameters, need add: if(is_scale_out)
+      if (get_rank() == 0) {
+        // simply choose the rank 0 worker to move parameters
+        LOG(INFO) << "worker rank 0 move parameters to new nodes: " << scale_nodes_.DebugStrNodes();
+        MoveParamsToNewNode(scale_nodes_);
+
+      }
       scale_nodes_.Clear();
     }
   }
@@ -250,8 +256,62 @@ class KVStoreDist : public KVStoreLocal {
   }
   std::unordered_map<int, NDArray> parameters_;
 
-  std::string DebugParamAbstract(const NDArray * param) {
+  /**
+   * \brief move parameters to new node
+   * \param key the key of the parameter
+   * \param param the parameter
+   * \param nodes the nodes to be moved to
+   * \param fut_timestamp the future timestamp, which notify the new node the start timestamp
+   */
+  void Move_(const int key,
+             const NDArray& param,
+             const std::vector<int>& nodes,
+             const int fut_timestamp,
+             int priority = 0) {
+    // move parameters to new node
+    auto move_parameters = [this, key, param, nodes, fut_timestamp](RunContext rctx,
+                                                                    Engine::CallbackOnComplete cb) {
+      // the timestamp is put in the key as the last element                                                              
+      ps::SArray<ps::Key> keys({key, fut_timestamp}); 
+      const int dtype = param.dtype();
+      if (param.storage_type() == kDefaultStorage) {
+        int num_bytes = param.shape().Size() * mshadow::mshadow_sizeof(dtype);
+        ps::SArray<char> vals(static_cast<char*>(param.data().dptr_),
+                              num_bytes,
+                              false);  // no delete
+        ps::SArray<int> lens({num_bytes});
+        int cmd = GetCommandType(RequestType::kParamtersMigration, dtype);
+        CHECK_NOTNULL(ps_worker_)->ZMove(nodes, keys, vals, lens, cmd, [cb]() { cb(); });
+      } else {
+        LOG(FATAL) << "unsupported storage type";
+      }
+    };
 
+    Engine::Get()->PushAsync(move_parameters,
+                             pinned_ctx_,
+                             {param.var()},
+                             {},
+                             FnProperty::kNormal,
+                             priority,
+                             "KVStoreDistMoveParamsToNewNode");
+  }
+
+  /**
+   * \brief move parameters to new node
+   * \param scale_nodes the nodes to be scaled
+  */
+  void MoveParamsToNewNode(NodeScalingInfo scale_nodes) {
+    auto& nodes = scale_nodes.GetNodes();
+    int fut_timestamp = scale_nodes.GetFutureTimestamp();
+    for (auto& kv : parameters_) {
+      int key = kv.first;
+      NDArray& param = kv.second;
+      //move parameters, keys are not need encode
+      Move_(key, param, nodes, fut_timestamp);
+    }
+  }
+
+  std::string DebugParamAbstract(const NDArray* param) {
     auto shape = param->shape();
     NDArray temp = NDArray(shape, Context::CPU(), false, param->dtype());
     temp.SyncCopyFromCPU(param->data().dptr_, param->shape().Size());
@@ -266,6 +326,7 @@ class KVStoreDist : public KVStoreLocal {
   }
 
   void InitImpl(const std::vector<int>& keys, const std::vector<NDArray>& values) override {
+    // init keys and values in server
     CheckUnique(keys);
     for (size_t i = 0; i < keys.size(); ++i) {
       InitKV(keys[i], values[i]);
@@ -281,8 +342,27 @@ class KVStoreDist : public KVStoreLocal {
     } else {
       // do nothing
     }
-    if (!ps::Postoffice::Get()->is_recovery() && !ps::Postoffice::Get()->is_scale()) {
+
+    if (!ps::Postoffice::Get()->is_recovery() && !IsScaleNode()){
+      // for normally added nodes, need to wait until the parameters are ready
       Barrier();
+    }
+    // init local parameters
+    if (IsScaleNode()){
+      // for scale nodes, should wait until the parameters moved to here
+      int timestamp;
+      for (size_t i = 0; i < keys.size(); ++i) {
+        NDArray& param = recved_params_store_.WaitKey(keys[i]);
+        param = param.Reshape(values[i].shape());
+        CopyFromTo(param, &values[i]);
+        values[i].WaitToRead();
+        recved_params_store_.Clear(keys[i]);
+        timestamp = recved_params_store_.GetBeginTimeStamp();
+        this->timestamp_ = timestamp;
+      }
+    }else{
+      // for normally added nodes, pull the parameters from server
+      // this will happen in the api layer, there is nothing to do
     }
   }
 
@@ -903,6 +983,43 @@ class KVStoreDist : public KVStoreLocal {
     return pskv;
   }
 
+  void RecvFreshParams(const DataHandleType type,
+                       const ps::KVMeta& req_meta,
+                       const ps::KVPairs<char>& req_data,
+                       ps::KVWorker<char>* worker) {
+    // do some check
+    CHECK_EQ(req_data.keys.size(), (size_t)2); // key and timestamp
+    CHECK_EQ(req_data.lens.size(), (size_t)1);
+    CHECK_EQ(req_data.vals.size(), (size_t)req_data.lens[0]);
+    ps::Key key = req_data.keys[0];
+    // get the timestamp, the last element of keys
+    const uint64_t fut_timestamp = req_data.keys[1];
+
+    size_t ds[] = {(size_t)req_data.lens[0] / mshadow::mshadow_sizeof(type.dtype)};
+    mxnet::TShape dshape(ds, ds + 1);
+    TBlob recv_blob;
+    MSHADOW_REAL_TYPE_SWITCH(type.dtype, DType, {
+      recv_blob = TBlob(reinterpret_cast<DType*>(req_data.vals.data()), dshape, cpu::kDevMask);
+    });
+    NDArray recved = NDArray(recv_blob, 0);
+    recved_params_store_.Store(key, recved, fut_timestamp);
+  }
+
+  void DataHandle(const ps::KVMeta& req_meta,
+                  const ps::KVPairs<char>& req_data,
+                  ps::KVWorker<char>* worker) {
+    DataHandleType type = DepairDataHandleType(req_meta.cmd);
+    switch (type.requestType) {
+      case RequestType::kParamtersMigration:
+      RecvFreshParams(type, req_meta, req_data, worker);
+      break;
+      default: {
+        LOG(FATAL) << "DataHandleType " << static_cast<int>(type.requestType) << " not supported";
+      }
+    }
+    worker->Response(req_meta);
+  }
+
   void RequestHandle(const ps::SimpleData& recved, ps::SimpleApp* app) {
     ControllerCommand command = static_cast<ControllerCommand>(recved.head);
     switch (command) {
@@ -920,6 +1037,7 @@ class KVStoreDist : public KVStoreLocal {
     }
   }
 
+  RecvedParamsStore recved_params_store_;
   /**
    * \brief the server handle
    */
@@ -953,7 +1071,7 @@ class KVStoreDist : public KVStoreLocal {
 
   // the var timestamp for scalling clock
   // only frontend thread will use it
-  int timestamp_ = 0;
+  int timestamp_ ;
 
   std::mutex scale_nodes_mu_;    // mutex for scale_nodes_
   NodeScalingInfo scale_nodes_;  // store the scaling nodes information

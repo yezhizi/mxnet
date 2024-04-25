@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
-from __future__ import print_function
-
+import logging
 import os
 import sys
 import random
@@ -9,6 +8,23 @@ import numpy as np
 import mxnet as mx
 from mxnet import autograd, gluon, kv, nd
 from mxnet.gluon.model_zoo import vision
+
+# get command line arguments
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--logfile', type=str, default='', help='log file')
+args = parser.parse_args()
+logfile = args.logfile
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
+
+if(logfile != ''):
+    fh = logging.FileHandler(logfile)
+    logger.addHandler(fh)
+    formatter = logging.Formatter('%(message)s')
+    fh.setFormatter(formatter)
+    fh.setLevel(logging.DEBUG)
 
 use_cuda = os.environ.get('USE_CUDA', '0') == '1'
 mx.random.seed(42)
@@ -23,7 +39,6 @@ epochs = 5
 
 num_gpus = mx.context.num_gpus()  # number of GPUs on this machine
 ctx = [mx.gpu(i) for i in range(num_gpus)] if use_cuda else [mx.cpu()]
-print(ctx)
 batch_size = batch_size_per_gpu * (len(ctx))
 
 # We'll use cross entropy loss since we are doing multiclass classification
@@ -125,7 +140,7 @@ def train_batch(batch_list, context, network, gluon_trainer):
         # Run the backward pass (calculate gradients) on all GPUs
         for l in losses:
             l.backward()
-        
+
     # Split and load data into multiple GPUs
     data = batch_list[0]
     data = gluon.utils.split_and_load(data, context)
@@ -159,16 +174,18 @@ def train_batch(batch_list, context, network, gluon_trainer):
     # Update the parameters
     # this_batch_size = batch_list[0].shape[0]
     gluon_trainer.step(kvstore.num_workers)
-    for idx, param in enumerate(params):
-        print("Key: ", idx, "Value: ", np.mean(param.data().asnumpy()))
+    # for idx, param in enumerate(params):
+    #     logger.info ("Key: %d, Value: %f" % (idx, np.mean(param.data().asnumpy())))
 
 # Load the training data
 train_data = gluon.data.DataLoader(gluon.data.vision.CIFAR10(train=True, transform=transform), batch_size,
                                    sampler=SplitSampler(50000),last_batch='discard')
 
 # Load the test data
-test_data = gluon.data.DataLoader(gluon.data.vision.CIFAR10(train=False, transform=transform),
-                                  batch_size, shuffle=False)
+test_data = gluon.data.DataLoader(gluon.data.vision.CIFAR10(train=False, transform=transform), batch_size,
+                                  sampler=SplitSampler(500), shuffle=False)
+# test_data = gluon.data.DataLoader(gluon.data.vision.CIFAR10(train=False, transform=transform), batch_size,
+#                                   shuffle=False)
 
 # Use ResNet from model zoo
 net = vision.resnet18_v1()
@@ -191,26 +208,41 @@ params = list(net.collect_params().values())
 for idx, param in enumerate(params):
     if param.grad_req == 'null':
         continue
-    kvstore.init(idx, param.data())
-    kvstore.pull(idx, param.data(), priority=-idx)
+    kvstore.init(idx, param.data(), priority=-idx)
+    
+    # we merge the `pull` into  `init` for initializing the parameters at first time
+    # kvstore.pull(idx, param.data(), priority=-idx)
     param.data().wait_to_read()
 
+# for idx, param in enumerate(params):
+#     kvstore.test(idx, param.data())
+#     param.data().wait_to_read()
+#     print("Key: ", idx, "Value: ", np.mean(param.data().asnumpy()))
 
-print("Training Started")
+# for idx, param in enumerate(params):
+#     # key mean
+#     logger.info ("Key: %d, Value: %f" % (idx, np.mean(param.data().asnumpy())))
+
+test_per_batch = 20
+
+# Iterate through batches and run training using multiple GPUs
+gloval_batch_num = 1
+
 # Run as many epochs as required
 for epoch in range(epochs):
 
-    # Iterate through batches and run training using multiple GPUs
-    batch_num = 1
     for batch in train_data:
+        # logger.info("Batch %d" % batch_num)
         # Train the batch using multiple GPUs
         train_batch(batch, ctx, net, trainer)
-
-        batch_num += 1
+        if test_per_batch > 0 and gloval_batch_num % test_per_batch == 0:
+            test_accuracy = evaluate_accuracy(test_data, net)
+            logger.info("Epoch %d: Batch %d: Test_acc %f" % (epoch, gloval_batch_num, test_accuracy))
+        
+        gloval_batch_num += 1
         kvstore.batch_end()
-
+      
 
     # Print test accuracy after every epoch
     test_accuracy = evaluate_accuracy(test_data, net)
-    print("Epoch %d: Test_acc %f" % (epoch, test_accuracy))
-    sys.stdout.flush()
+    logger.info("Epoch %d: Test_acc %f" % (epoch, test_accuracy))
