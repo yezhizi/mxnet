@@ -341,10 +341,15 @@ class KVStore {
 #endif  // MXNET_USE_DIST_KVSTORE
   }
   
-  static bool IsScaleNode() {
+  bool IsScaleNode() {
 #if MXNET_USE_DIST_KVSTORE
-    auto is_scale = ps::Postoffice::Get()->is_scale();
-    return is_scale;
+    if(this->is_scaled_) return true;
+    auto is_scale_lowlayer_ = ps::Postoffice::Get()->is_scale();
+    if(is_scale_lowlayer_ || this->is_scaled_) {
+      this->is_scaled_ = true;
+      return true;
+    }
+    return false;
 #else
     return false;
 #endif  // MXNET_USE_DIST_KVSTORE
@@ -483,6 +488,12 @@ class KVStore {
   virtual void BatchEnd(){}
 
  protected:
+
+  /**
+   * \brief whether is a scaled node.
+   */
+  bool is_scaled_{false};
+
   /**
    * \brief the user-defined updater
    */

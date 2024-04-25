@@ -2737,7 +2737,8 @@ MXNET_DLL int MXKVStoreFree(KVStoreHandle handle);
 MXNET_DLL int MXKVStoreInit(KVStoreHandle handle,
                             uint32_t num,
                             const int* keys,
-                            NDArrayHandle* vals);
+                            NDArrayHandle* vals,
+                            int priority);
 
 /*!
  * \brief Init a list of (key,value) pairs in kvstore, where each key is a string

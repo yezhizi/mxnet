@@ -2,7 +2,8 @@
 source $(dirname $BASH_SOURCE)/command.sh
 
 # export MXNET_LIBRARY_PATH=$(readlink -f $(dirname $0)/../build/libmxnet.so) 
-source $(dirname $0)/envs.sh
+current_dir=$(dirname "$(readlink -f "$BASH_SOURCE")")
+source "$current_dir/envs.sh"
 
 export DMLC_ROLE=worker
 export DMLC_PS_ROOT_URI=127.0.0.1

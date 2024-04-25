@@ -2499,15 +2499,24 @@ int MXKVStoreFree(KVStoreHandle handle) {
 int MXKVStoreInit(KVStoreHandle handle,
                   uint32_t num,
                   const int* keys,
-                  NDArrayHandle* vals) {
+                  NDArrayHandle* vals,
+                  int priority) {
   API_BEGIN();
   std::vector<int> v_keys(num);
   std::vector<NDArray> v_vals(num);
+  std::vector<NDArray*> v_vals_t(num);
   for (uint32_t i = 0; i < num; ++i) {
     v_keys[i] = keys[i];
     v_vals[i] = *static_cast<NDArray*>(vals[i]);
+    v_vals_t[i] = static_cast<NDArray*>(vals[i]);
   }
   static_cast<KVStore*>(handle)->Init(v_keys, v_vals);
+  bool is_scaled = static_cast<KVStore*>(handle)->IsScaleNode();
+  if(!is_scaled){
+    // for normally added nodes, should pull the params from server to init
+    // we do pull here, so the user code should not call pull after init!!!!
+    static_cast<KVStore*>(handle)->Pull(v_keys, v_vals_t, priority);
+  }
   API_END();
 }
 
@@ -2758,8 +2767,14 @@ MXNET_DLL int MXKVStoreTest(KVStoreHandle handle,
   API_BEGIN();
   std::vector<int> v_keys(num);
   std::vector<NDArray*> v_vals(num);
+  std::unordered_map<int, NDArray> param_arrays;
   for (uint32_t i = 0; i < num; ++i) {
     LOG(INFO) << "key: " << keys[i] << "params address "<< vals[i];
+    v_keys[i] = keys[i];
+    v_vals[i] = static_cast<NDArray*>(vals[i]);
+    param_arrays[keys[i]] = *v_vals[i];
+
+    param_arrays[keys[i]] = NDArray(v_vals[i]->shape(), v_vals[i]->ctx(), false, v_vals[i]->dtype());
   }
   API_END();;
                             }

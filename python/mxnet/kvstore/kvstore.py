@@ -146,7 +146,7 @@ class KVStore(KVStoreBase):
             return 
         check_call(_LIB.MXKVStoreNotifyPreparationFinished(self.handle))
     
-    def init(self, key, value):
+    def init(self, key, value, priority=0):
         """ Initializes a single or a sequence of key-value pairs into the store.
 
         For each key, one must `init` it before calling `push` or `pull`.
@@ -188,7 +188,7 @@ class KVStore(KVStoreBase):
         if use_str_keys:
             check_call(_LIB.MXKVStoreInitEx(self.handle, mx_uint(len(ckeys)), ckeys, cvals))
         else:
-            check_call(_LIB.MXKVStoreInit(self.handle, mx_uint(len(ckeys)), ckeys, cvals))
+            check_call(_LIB.MXKVStoreInit(self.handle, mx_uint(len(ckeys)), ckeys, cvals, ctypes.c_int(priority)))
 
     def push(self, key, value, priority=0):
         """ Pushes a single or a sequence of key-value pairs into the store.
