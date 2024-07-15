@@ -1,5 +1,10 @@
 #!/usr/bin/env python
 
+from timetracker import TimeTracker
+timetracker = TimeTracker()
+
+timetracker.start("ctx preparation")
+
 import logging
 import os
 import sys
@@ -188,7 +193,9 @@ test_data = gluon.data.DataLoader(gluon.data.vision.CIFAR10(train=False, transfo
 #                                   shuffle=False)
 
 # Use ResNet from model zoo
-net = vision.resnet18_v1()
+# net = vision.resnet18_v1()
+net = vision.resnet50_v1()
+# net = vision.vgg11()
 
 # Initialize the parameters with Xavier initializer
 net.collect_params().initialize(mx.init.Xavier(), ctx=ctx)
@@ -200,6 +207,7 @@ softmax_cross_entropy = gluon.loss.SoftmaxCrossEntropyLoss()
 # Use Adam optimizer. Ask trainer to use the distributor kv store.
 trainer = gluon.Trainer(net.collect_params(), 'adam', {'learning_rate': .001})
 
+timetracker.end("ctx preparation")
 
 kvstore.notify_begin()
 
@@ -223,14 +231,16 @@ for idx, param in enumerate(params):
 #     # key mean
 #     logger.info ("Key: %d, Value: %f" % (idx, np.mean(param.data().asnumpy())))
 
-test_per_batch = 20
+test_per_batch = 0
 
 # Iterate through batches and run training using multiple GPUs
-gloval_batch_num = 1
+gloval_batch_num = 0
 
 # Run as many epochs as required
 for epoch in range(epochs):
 
+    exit_ = False
+    
     for batch in train_data:
         # logger.info("Batch %d" % batch_num)
         # Train the batch using multiple GPUs
@@ -241,8 +251,25 @@ for epoch in range(epochs):
         
         gloval_batch_num += 1
         kvstore.batch_end()
-      
+        
+        if gloval_batch_num==2:
+            kvstore.notify_exit(1)
+        if gloval_batch_num==3:
+            exit_ = True
+            break
+    if exit_:
+        break
 
     # Print test accuracy after every epoch
     test_accuracy = evaluate_accuracy(test_data, net)
     logger.info("Epoch %d: Test_acc %f" % (epoch, test_accuracy))
+
+timetracker.start("save checkpoint")
+net.save_parameters("./temp.param")
+timetracker.end("save checkpoint")
+
+timetracker.start("load checkpoint")
+net.load_parameters("./temp.param")
+timetracker.end("load checkpoint")
+
+timetracker.print_all()

@@ -2923,6 +2923,12 @@ int MXKVStoreNotifyPreparationFinished(KVStoreHandle handle) {
   API_END();
 }
 
+int MXKVStoreNotifyExit(KVStoreHandle handle, int expect) {
+  API_BEGIN();
+  static_cast<KVStore*>(handle)->NotifyWorkerExit(expect);
+  API_END();
+}
+
 int MXKVStoreIsScaleNode(KVStoreHandle handle, int *ret){
   API_BEGIN();
   bool is_scale = static_cast<KVStore*>(handle)->IsScaleNode();

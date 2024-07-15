@@ -25,7 +25,6 @@
 #include "../operator/tensor/elemwise_binary_op-inl.h"
 #include "../operator/tensor/init_op.h"
 
-
 namespace mxnet {
 namespace kvstore {
 class KVStoreDistController {
@@ -100,13 +99,20 @@ class KVStoreDistController {
           this->timestamp_ = std::stoi(body);
 
           if (this->timestamp_ == scaling_nodes_.GetFutureTimestamp()) {
-            LOG(INFO) << "Scheduler reach the timestamp " << this->timestamp_
-                      << ", start to scale, id: " << scaling_nodes_.DebugStrNodes();
-            // start to scale
-            ps::Postoffice::Get()->UpdateScaleNodes(scaling_nodes_.GetNodes(),
-                                                    scaling_nodes_.IsWorker());
-            scaling_nodes_.Clear();
+            ProcessOnScaleClock();
           }
+          break;
+        }
+        case ControllerCommand::kNotifyExit: {
+          int sender = recved.sender;
+          scaling_nodes_.NodeOut(sender, true);
+          LOG(INFO) << "Node " << sender << " is going to exit";
+          int expect = std::stoi(body);
+          int timestamp = calcFutTimestamp(true, expect);
+          scaling_nodes_.setFutureTimestamp(timestamp);
+          SendtoAllNodes(ControllerCommand::kNodeScaleAnounce, scaling_nodes_.Encode());
+          // Response
+          app->Response(recved);
           break;
         }
         default: {
@@ -120,8 +126,13 @@ class KVStoreDistController {
     LOG(INFO) << "Controller ResponseHanle";
   }
 
-  int calcFutTimestamp() {
-    return timestamp_ + 5;
+  int calcFutTimestamp(bool is_scale_in_ = false, int expect = 0) {
+    if (is_scale_in_) {
+      CHECK_GT(expect, 0);
+      return expect + timestamp_;
+    } else {
+      return timestamp_ + 1;
+    }
   }
 
   void SendtoAllNodes(ControllerCommand cmd, const std::string& body) {
@@ -130,6 +141,26 @@ class KVStoreDistController {
     // do not wait! becase there is only one thread
     // wait will block reciving response ,which results in dead lock
     ps_scheduler_->Request(head, body, ps::kServerGroup + ps::kWorkerGroup);
+  }
+
+  void ProcessOnScaleClock() {
+    LOG(INFO) << "Scheduler reach the timestamp " << this->timestamp_
+              << ", start to scale, id: " << scaling_nodes_.DebugStrNodes();
+    // start to scale
+    bool is_worker = scaling_nodes_.IsWorker();
+    bool is_scale_out = scaling_nodes_.isScaleOut();
+    if(is_scale_out){
+      //scale out
+      ps::Postoffice::Get()->UpdateScaleNodes(scaling_nodes_.GetNodes(), is_worker);
+    }else{
+      //scale in
+      //TODO: 没有处理当已经有scale node的情况下，有节点加入/退出的情况。
+      // 现在只是简单广播时间戳，所有的节点仅在postoffice层更新。等待退出节点在van层发送delmsg消息后，scheduler广播del消息才更新van层。
+      // 系统只支持处理完一个节点的加入和退出后，才能处理下一个节点的加入退出。一个节点的scale的时间为s级别，节点scale发生的时间间隔为min级别
+      // 至少从现有的论文来看是这样的。
+      ps::Postoffice::Get()->ScaleIn(scaling_nodes_.GetNodes(), is_worker);
+    }
+    scaling_nodes_.Clear();
   }
 
   ps::KVServer<char>* ps_scheduler_;

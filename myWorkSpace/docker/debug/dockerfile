@@ -1,28 +1,27 @@
-FROM nvidia/cuda:11.2.2-cudnn8-runtime-ubuntu20.04
+FROM python:3.9
 # FROM nvidia/cuda:11.6.1-cudnn8-runtime-ubuntu20.04
 
 WORKDIR /mxnet
 
-COPY ./sources.list /etc/apt/sources.list
+# COPY ./sources.list /etc/apt/sources.list
 
 
 ARG  DEBIAN_FRONTEND=noninteractive
-
-ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda/compat:/mxnet/build/3rdparty/openmp/runtime/src:/mxnet/build/3rdparty/ps-lite
-
-ENV CUDA_VISIBLE_DEVICES=ALL
 
 RUN rm -f /etc/apt/sources.list.d/cuda.list \
     && rm -f /etc/apt/sources.list.d/nvidia-ml.list
 
 COPY ./requirements.txt /mxnet/requirements.txt
 RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
+    # python3 \
+    # python3-pip \
     libopenblas-dev \
     libzmq3-dev \
     libopencv-dev \
     && rm -rf /var/lib/apt/lists/* \
     && pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+
+
+RUN apt-get autoremove -y && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 CMD ["bash"]

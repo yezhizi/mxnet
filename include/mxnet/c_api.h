@@ -3128,6 +3128,8 @@ MXNET_DLL int MXKVStoreRunController(KVStoreHandle handle);
 
 MXNET_DLL int MXKVStoreNotifyPreparationFinished(KVStoreHandle handle);
 
+MXNET_DLL int MXKVStoreNotifyExit(KVStoreHandle handle, int expect);
+
 MXNET_DLL int MXKVStoreIsScaleNode(KVStoreHandle handle, int *ret);
 
 MXNET_DLL int MXKVStoreSendCommmandToServers(KVStoreHandle handle,

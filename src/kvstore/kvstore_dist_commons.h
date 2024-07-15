@@ -18,6 +18,7 @@ namespace kvstore {
 
 enum class ControllerCommand {
   kNotifyPreparationFinished = 11,
+  kNotifyExit = 14, 
   kNodeScaleAnounce = 12,
   kTimestampUpdate = 13,
 };
@@ -103,12 +104,19 @@ class NodeScalingInfo {
   const bool IsWorker() const {
     return is_worker_;
   }
+  
+  const bool isScaleOut() const{
+    return is_scale_out_;
+  }
 
   void Decode(const std::string& str) {
     std::istringstream is(str);
     std::string type;
+    std::string is_scale_out;
     is >> type;
     is_worker_ = type == "w";
+    is >> is_scale_out;
+    is_scale_out_ = is_scale_out == "1";
     is >> future_timestamp_;
     int node;
     while (is >> node) {
@@ -128,6 +136,7 @@ class NodeScalingInfo {
     std::string ret;
     // w 10 8,9,10  ==>  worker timestamp=10 nodes=8,9,10
     ret += is_worker_ ? "w " : "s ";
+    ret += is_scale_out_ ? "1 " : "0 ";
     ret += std::to_string(future_timestamp_);
     ret += " ";
     for (auto node : nodes_) {
@@ -141,12 +150,15 @@ class NodeScalingInfo {
   void RegisterNode(bool is_worker, int node_id) {
     if (!nodes_.empty()) {
       CHECK(is_worker && is_worker_) << "Not Support different type of node scalling";
+      CHECK(is_scale_out_);
     }
     nodes_.push_back(node_id);
     is_worker_ = is_worker;
+    is_scale_out_ = true;
   }
 
   bool NodeReady(int node_id) {
+    CHECK(is_scale_out_);
     if (std::find(nodes_.begin(), nodes_.end(), node_id) != nodes_.end()) {
       num_ready_nodes_++;
       if (num_ready_nodes_ == nodes_.size())
@@ -156,6 +168,14 @@ class NodeScalingInfo {
     }
     return false;
   }
+
+  void NodeOut(int node_id, bool is_worker){
+    CHECK(nodes_.empty());
+    nodes_.push_back(node_id);
+    is_scale_out_ = false;
+    is_worker_ = is_worker;
+  }
+
   void setFutureTimestamp(int future_timestamp) {
     this->future_timestamp_ = future_timestamp;
   }
@@ -166,6 +186,7 @@ class NodeScalingInfo {
   bool is_worker_;
   int num_ready_nodes_;
   int future_timestamp_;
+  bool is_scale_out_;
 };
 
 /**

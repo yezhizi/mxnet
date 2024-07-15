@@ -176,6 +176,13 @@ class KVStoreDist : public KVStoreLocal {
     this->is_scaled_ = true;
   }
 
+  void NotifyWorkerExit(int expect) override {
+    CHECK(IsWorkerNode());
+    int head = static_cast<int>(ControllerCommand::kNotifyExit);
+    ps_worker_->Wait(ps_worker_->Request(head, std::to_string(expect), ps::kScheduler));
+    LOG(INFO)<< "Worker " << get_rank() << " notify exit";
+  }
+
   void RunController() override {
     CHECK(IsSchedulerNode());
 
@@ -195,18 +202,7 @@ class KVStoreDist : public KVStoreLocal {
     LOG(INFO) << "Trainning batch end, timestamp: " << this->timestamp_;
     std::lock_guard<std::mutex> lock(scale_nodes_mu_);
     if (scale_nodes_.GetFutureTimestamp() == this->timestamp_) {
-      LOG(INFO) << "timestamp reach " << this->timestamp_ << ", start to scalling";
-      // scalling operation
-      ps::Postoffice::Get()->UpdateScaleNodes(scale_nodes_.GetNodes(), scale_nodes_.IsWorker());
-
-      // TODO: move parameters, need add: if(is_scale_out)
-      if (get_rank() == 0) {
-        // simply choose the rank 0 worker to move parameters
-        LOG(INFO) << "worker rank 0 move parameters to new nodes: " << scale_nodes_.DebugStrNodes();
-        MoveParamsToNewNode(scale_nodes_);
-
-      }
-      scale_nodes_.Clear();
+      ProcessOnScaleClock();
     }
   }
 
@@ -309,6 +305,32 @@ class KVStoreDist : public KVStoreLocal {
       //move parameters, keys are not need encode
       Move_(key, param, nodes, fut_timestamp);
     }
+  }
+  void ProcessOnScaleClock() {
+    LOG(INFO) << "timestamp reach " << this->timestamp_ << ", start to scalling";
+    // scalling operation
+    bool is_scale_out = scale_nodes_.isScaleOut();
+    bool is_worker = scale_nodes_.IsWorker();
+    if(is_scale_out){
+      //scale out
+      ps::Postoffice::Get()->UpdateScaleNodes(scale_nodes_.GetNodes(), scale_nodes_.IsWorker());
+      if (get_rank() == 0 && is_worker) {
+        // simply choose the rank 0 worker to move parameters
+        LOG(INFO) << "worker rank 0 move parameters to new nodes: " << scale_nodes_.DebugStrNodes();
+
+        // 统计时间
+        auto start = std::chrono::steady_clock::now();
+        MoveParamsToNewNode(scale_nodes_);
+        auto end = std::chrono::steady_clock::now();
+        auto diff = end - start;
+        LOG(INFO) << "MoveParamsToNewNode time: " << std::chrono::duration<double, std::milli>(diff).count() << " ms";
+      }
+    }else{
+      //sclae in
+      ps::Postoffice::Get()->ScaleIn(scale_nodes_.GetNodes(), scale_nodes_.IsWorker());
+    }
+    
+    scale_nodes_.Clear();
   }
 
   std::string DebugParamAbstract(const NDArray* param) {

@@ -268,10 +268,7 @@ class KVStoreDistServer {
           SendtoController(ControllerCommand::kTimestampUpdate, std::to_string(this->timestamp_));
         }
         if (this->timestamp_ == scale_nodes_.GetFutureTimestamp()) {
-          LOG(INFO) << "Server reached timestamp " << this->timestamp_
-                    << ", start to scale nodes, id = " << scale_nodes_.DebugStrNodes();
-          ps::Postoffice::Get()->UpdateScaleNodes(scale_nodes_.GetNodes(), scale_nodes_.IsWorker());
-          scale_nodes_.Clear();
+          ProcessOnScaleClock();
         }
       }
 
@@ -711,6 +708,22 @@ class KVStoreDistServer {
     } else {
       DefaultStorageResponse(type, key, req_meta, req_data, server);
     }
+  }
+
+  void ProcessOnScaleClock() {
+    LOG(INFO) << "Server reached timestamp " << this->timestamp_
+              << ", start to scale nodes, id = " << scale_nodes_.DebugStrNodes();
+    bool is_worker = scale_nodes_.IsWorker();
+    bool is_scale_out = scale_nodes_.isScaleOut();
+    if(is_scale_out){
+      //scale out
+      ps::Postoffice::Get()->UpdateScaleNodes(scale_nodes_.GetNodes(), scale_nodes_.IsWorker());
+    }else{
+      //scale in
+      ps::Postoffice::Get()->ScaleIn(scale_nodes_.GetNodes(), scale_nodes_.IsWorker());
+    }
+    scale_nodes_.Clear();
+    
   }
 
   int DecodeKey(ps::Key key) {

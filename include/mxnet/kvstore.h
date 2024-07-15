@@ -485,6 +485,8 @@ class KVStore {
 
   virtual void NotifyPreparationFinished() {}
 
+  virtual void NotifyWorkerExit(int expect) {}
+
   virtual void BatchEnd(){}
 
  protected:
@@ -518,7 +520,8 @@ class KVStore {
   /**
    * \brief whether to do barrier when finalize
    */
-  std::atomic<bool> barrier_before_exit_{true};
+  // std::atomic<bool> barrier_before_exit_{true};
+  std::atomic<bool> barrier_before_exit_{false};
 };
 
 }  // namespace mxnet

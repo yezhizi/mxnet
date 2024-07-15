@@ -68,6 +68,7 @@ class KVStore(KVStoreBase):
         self._updater_func = None
         self._str_updater_func = None
         self._is_p3 = (os.getenv('DMLC_PS_VAN_TYPE', '') == 'p3')
+        self._is_scale_in = False
 
     def __del__(self):
         check_call(_LIB.MXKVStoreFree(self.handle))
@@ -145,6 +146,18 @@ class KVStore(KVStoreBase):
         if not self.is_scale:
             return 
         check_call(_LIB.MXKVStoreNotifyPreparationFinished(self.handle))
+        
+    def notify_exit(self,expect):
+        """Notify Scheduler that the worker is going to leave.
+
+        Args:
+            expect: int
+                The expected timestamp of the worker.
+        """
+        if self._is_scale_in:
+            return
+        check_call(_LIB.MXKVStoreNotifyExit(self.handle, ctypes.c_int(expect)))
+        self._is_scale_in = True
     
     def init(self, key, value, priority=0):
         """ Initializes a single or a sequence of key-value pairs into the store.
